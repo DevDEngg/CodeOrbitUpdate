@@ -87,7 +87,8 @@ export default function Dashboard() {
       await addDoc(collection(db, 'tracking_sessions'), sessionData);
       
       // 2. Call our backend to setup the webhook programmatically
-      await fetch('https://your-backend-url.onrender.com/api/webhooks/setup', {
+      const backendUrl = import.meta.env.VITE_BACKEND_URL || 'https://your-backend-url.onrender.com';
+      await fetch(`${backendUrl}/api/webhooks/setup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ repoFullName: selectedRepo.full_name, token })
