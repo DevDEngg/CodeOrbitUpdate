@@ -144,7 +144,7 @@ export default function Dashboard() {
                     marginBottom: '12px',
                     borderRadius: 'var(--radius-md)',
                     border: selectedRepo?.id === repo.id ? '2px solid var(--accent-primary)' : '1px solid var(--glass-border)',
-                    background: selectedRepo?.id === repo.id ? 'rgba(109, 40, 217, 0.1)' : 'transparent',
+                    background: selectedRepo?.id === repo.id ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
                     cursor: 'pointer',
                     transition: 'var(--transition-fast)'
                   }}
@@ -159,7 +159,7 @@ export default function Dashboard() {
           </div>
 
           {selectedRepo && (
-            <div className="animate-fade-in" style={{ padding: '20px', background: 'rgba(0,0,0,0.2)', borderRadius: 'var(--radius-md)' }}>
+            <div className="animate-fade-in" style={{ padding: '20px', background: 'var(--glass-bg)', borderRadius: 'var(--radius-md)', border: '1px solid var(--glass-border)' }}>
               <h4 style={{ marginBottom: '16px' }}>Configure Tracker</h4>
               <div style={{ marginBottom: '20px' }}>
                 <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-secondary)' }}>
@@ -204,7 +204,7 @@ export default function Dashboard() {
                 const isActive = endDate > new Date();
                 
                 return (
-                  <div key={tracker.id} style={{ padding: '16px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-md)' }}>
+                  <div key={tracker.id} style={{ padding: '16px', background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-md)' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
                       <strong style={{ fontSize: '1.1rem' }}>{tracker.repoFullName}</strong>
                       {isActive ? (
@@ -212,7 +212,7 @@ export default function Dashboard() {
                           <span className="status-indicator"></span> Active
                         </span>
                       ) : (
-                        <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', background: 'rgba(255,255,255,0.1)', padding: '4px 10px', borderRadius: '20px' }}>Expired</span>
+                        <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', padding: '4px 10px', borderRadius: '20px' }}>Expired</span>
                       )}
                     </div>
                     <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', margin: 0 }}>
