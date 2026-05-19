@@ -130,7 +130,8 @@ app.post('/api/webhooks/setup', async (req, res) => {
 
   try {
     const url = `https://api.github.com/repos/${repoFullName}/hooks`;
-    const backendWebhookUrl = `https://your-backend-url.onrender.com/api/webhooks/github`;
+    const webhookBase = process.env.WEBHOOK_BASE_URL || `${req.protocol}://${req.get('host')}`;
+    const backendWebhookUrl = `${webhookBase}/api/webhooks/github`;
 
     console.log(`Setting up webhook for ${repoFullName} pointing to ${backendWebhookUrl}`);
 

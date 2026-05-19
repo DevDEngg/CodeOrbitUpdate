@@ -87,7 +87,8 @@ export default function Dashboard() {
       await addDoc(collection(db, 'tracking_sessions'), sessionData);
       
       // 2. Call our backend to setup the webhook programmatically
-      const backendUrl = import.meta.env.VITE_BACKEND_URL || 'https://your-backend-url.onrender.com';
+      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      const backendUrl = isLocalhost ? 'http://localhost:3000' : (import.meta.env.VITE_BACKEND_URL || '');
       await fetch(`${backendUrl}/api/webhooks/setup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
