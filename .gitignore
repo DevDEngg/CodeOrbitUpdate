@@ -31,7 +31,7 @@ lerna-debug.log*
 *.sw?
 
 # Agent task / system-generated files
-reference.json
+Code Review workflow.json
 task.md.resolved
 implementation_plan.md.resolved
 desktop.ini
