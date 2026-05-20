@@ -56,9 +56,6 @@ DO NOT comment on:
 - obvious code
 - low-confidence assumptions
 
-If the code is acceptable, return:
-"LGTM"
-
 IMPORTANT:
 - Be highly selective.
 - Fewer comments are BETTER than noisy comments.
