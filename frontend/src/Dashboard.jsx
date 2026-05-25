@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { auth, db } from './firebase';
+import { auth, db, githubProvider } from './firebase';
 import { collection, addDoc, serverTimestamp, query, where, getDocs } from 'firebase/firestore';
+import { linkWithPopup, GithubAuthProvider } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
 import { LogOut, Activity, Clock, CheckCircle } from 'lucide-react';
 
@@ -11,20 +12,37 @@ export default function Dashboard() {
   const [selectedRepo, setSelectedRepo] = useState(null);
   const [duration, setDuration] = useState(7);
   const [activeTrackers, setActiveTrackers] = useState([]);
+  const [hasGithubToken, setHasGithubToken] = useState(!!localStorage.getItem('github_token'));
   const navigate = useNavigate();
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged((currentUser) => {
       if (currentUser) {
         setUser(currentUser);
-        fetchRepos();
+        if (hasGithubToken) {
+          fetchRepos();
+        }
         fetchActiveTrackers(currentUser.uid);
       } else {
         navigate('/');
       }
     });
     return () => unsubscribe();
-  }, [navigate]);
+  }, [navigate, hasGithubToken]);
+
+  const handleConnectGithub = async () => {
+    try {
+      const result = await linkWithPopup(auth.currentUser, githubProvider);
+      const credential = GithubAuthProvider.credentialFromResult(result);
+      if (credential?.accessToken) {
+        localStorage.setItem('github_token', credential.accessToken);
+        setHasGithubToken(true);
+      }
+    } catch (error) {
+      console.error("Error linking GitHub account:", error);
+      alert(`Failed to connect GitHub: ${error.message}`);
+    }
+  };
 
   const fetchRepos = async () => {
     const token = localStorage.getItem('github_token');
@@ -82,35 +100,41 @@ export default function Dashboard() {
         isActive: true,
         githubToken: token
       };
-
-      // 1. Save to Firestore
-      await addDoc(collection(db, 'tracking_sessions'), sessionData);
       
-      // 2. Call our backend to setup the webhook programmatically
+      // 1. Call our backend to setup the webhook programmatically FIRST
       const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
       const backendUrl = isLocalhost ? 'http://localhost:3000' : (import.meta.env.VITE_BACKEND_URL || '');
-      await fetch(`${backendUrl}/api/webhooks/setup`, {
+      const response = await fetch(`${backendUrl}/api/webhooks/setup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ repoFullName: selectedRepo.full_name, token })
       });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Webhook setup failed with status: ${response.status}`);
+      }
+
+      // 2. Save to Firestore only if webhook setup is successful
+      await addDoc(collection(db, 'tracking_sessions'), sessionData);
 
       alert(`Successfully started tracking ${selectedRepo.name} for ${duration} days!`);
       setSelectedRepo(null);
       fetchActiveTrackers(user.uid);
     } catch (error) {
       console.error("Error starting tracker:", error);
-      alert("Failed to start tracking. See console.");
+      alert(`Failed to start tracking: ${error.message}. See console.`);
     }
   };
 
   const handleLogout = async () => {
     await auth.signOut();
     localStorage.removeItem('github_token');
+    setHasGithubToken(false);
     navigate('/');
   };
 
-  if (!user || loading) return <div className="app-container text-gradient" style={{ textAlign: 'center', marginTop: '100px', fontSize: '1.2rem' }}>Loading your repositories...</div>;
+  if (!user) return <div className="app-container text-gradient" style={{ textAlign: 'center', marginTop: '100px', fontSize: '1.2rem' }}>Welcome to CodeOrbit! Loading dashboard...</div>;
 
   return (
     <div className="app-container animate-fade-in">
@@ -146,7 +170,25 @@ export default function Dashboard() {
           </div>
           
           <div style={{ maxHeight: '400px', overflowY: 'auto', paddingRight: '8px', marginBottom: '24px' }}>
-            {repos.length === 0 ? (
+            {!hasGithubToken ? (
+              <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-secondary)' }}>
+                <p style={{ marginBottom: '16px' }}>You need to connect your GitHub account to view repositories.</p>
+                <button 
+                  onClick={handleConnectGithub} 
+                  className="btn-primary" 
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+                >
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                    <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.7-2.782.603-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.646.35-1.086.636-1.336-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.268 2.75 1.022A9.606 9.606 0 0112 6.82c.85.004 1.705.114 2.504.336 1.909-1.29 2.747-1.022 2.747-1.022.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.138 20.161 22 16.416 22 12c0-5.523-4.477-10-10-10z" />
+                  </svg>
+                  Connect to GitHub
+                </button>
+              </div>
+            ) : loading ? (
+              <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-secondary)' }}>
+                <p>Loading your repositories...</p>
+              </div>
+            ) : repos.length === 0 ? (
               <p style={{ color: 'var(--text-secondary)' }}>No repositories found.</p>
             ) : (
               repos.map(repo => (

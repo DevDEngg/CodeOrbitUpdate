@@ -163,6 +163,7 @@ app.post('/api/webhooks/setup', async (req, res) => {
         console.log('Webhook already exists for this repository.');
         return res.status(200).json({ message: 'Webhook already active' });
       }
+      console.error('GitHub API Validation Errors:', JSON.stringify(data.errors));
       throw new Error(data.message || 'GitHub API error');
     }
 
