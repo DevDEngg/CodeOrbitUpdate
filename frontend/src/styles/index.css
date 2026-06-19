@@ -1,7 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-
 :root {
-  /* Color Palette - Premium Dark Mode (Matte Black) */
   --bg-primary: #121212;
   --bg-secondary: #1e1e1e;
   --text-primary: #f8fafc;
@@ -12,12 +9,10 @@
   --success: #10b981;
   --error: #ef4444;
   
-  /* Glassmorphism Variables */
   --glass-bg: rgba(255, 255, 255, 0.02);
   --glass-border: rgba(255, 255, 255, 0.05);
   --glass-blur: blur(12px);
   
-  /* UI Variables */
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 20px;

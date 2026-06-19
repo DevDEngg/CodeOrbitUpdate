@@ -2,10 +2,11 @@ import React, { useState } from "react";
 import { signInWithCustomToken } from "firebase/auth";
 import { auth } from "../config/firebase";
 import { useNavigate, Link } from "react-router-dom";
-import robotImg from "../assets/robot.png";
-import robotLightImg from "../assets/robot_light.png";
-import logoImg from "../assets/logo.png";
+import robotImg from "../assets/robo_dark.webp";
+import robotLightImg from "../assets/robo_ligth.webp";
+import logoImg from "../assets/logo.webp";
 import { useTheme } from "../context/ThemeContext";
+import { Eye, EyeOff } from "lucide-react";
 import "../styles/Auth.css";
 
 export default function SignUp() {
@@ -16,6 +17,7 @@ export default function SignUp() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleEmailSignUp = async (e) => {
     e.preventDefault();
@@ -58,7 +60,7 @@ export default function SignUp() {
   };
 
   return (
-    <div className="auth-container animate-fade-in">
+    <main className="auth-container animate-fade-in">
       <div className="auth-hero">
         <img
           src={theme === "light" ? robotLightImg : robotImg}
@@ -108,14 +110,24 @@ export default function SignUp() {
 
             <div className="auth-input-group">
               <label className="auth-input-label">Password</label>
-              <input
-                type="password"
-                className="auth-input"
-                placeholder="Enter your password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
+              <div className="auth-password-wrapper">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  className="auth-input"
+                  placeholder="Enter your password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(prev => !prev)}
+                  className="password-toggle-btn"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                </button>
+              </div>
             </div>
 
             <div className="auth-form-options">
@@ -142,6 +154,6 @@ export default function SignUp() {
           </div>
         </div>
       </div>
-    </div>
+    </main>
   );
 }

@@ -8,7 +8,17 @@ app.use(cors());
 app.use(morgan('dev'));
 app.use(express.json());
 
-// Import modular route handlers
+const { rateLimit } = require('express-rate-limit');
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 100,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { error: 'Too many requests from this IP, please try again after 15 minutes.' }
+});
+
+app.use('/api', limiter);
+
 const authRouter = require('./routes/auth');
 const webhooksRouter = require('./routes/webhooks');
 
