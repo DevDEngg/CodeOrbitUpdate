@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { auth, db, githubProvider } from './firebase';
+import { auth, db, githubProvider } from '../config/firebase';
 import { collection, addDoc, serverTimestamp, query, where, getDocs } from 'firebase/firestore';
 import { linkWithPopup, GithubAuthProvider } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
 import { LogOut, Activity, Clock, CheckCircle } from 'lucide-react';
+import '../styles/Dashboard.css';
 
 export default function Dashboard() {
   const [user, setUser] = useState(null);
@@ -16,21 +17,35 @@ export default function Dashboard() {
   const navigate = useNavigate();
 
   useEffect(() => {
+    const token = localStorage.getItem('access_token');
+    const profileJson = localStorage.getItem('user_profile');
+    if (!token || !profileJson) {
+      navigate('/');
+      return;
+    }
+
+    const profile = JSON.parse(profileJson);
+    setUser(profile);
+
+    if (hasGithubToken) {
+      fetchRepos();
+    }
+    fetchActiveTrackers(profile.uid);
+
     const unsubscribe = auth.onAuthStateChanged((currentUser) => {
-      if (currentUser) {
-        setUser(currentUser);
-        if (hasGithubToken) {
-          fetchRepos();
-        }
-        fetchActiveTrackers(currentUser.uid);
-      } else {
-        navigate('/');
+      if (!currentUser) {
+        console.log("Firebase auth state is empty on dashboard, but we are logged in locally.");
       }
     });
     return () => unsubscribe();
   }, [navigate, hasGithubToken]);
 
   const handleConnectGithub = async () => {
+    if (!auth.currentUser) {
+      alert("Firebase session is initializing. Please wait a moment and try again.");
+      return;
+    }
+
     try {
       const result = await linkWithPopup(auth.currentUser, githubProvider);
       const credential = GithubAuthProvider.credentialFromResult(result);
@@ -40,7 +55,18 @@ export default function Dashboard() {
       }
     } catch (error) {
       console.error("Error linking GitHub account:", error);
-      alert(`Failed to connect GitHub: ${error.message}`);
+      if (error.code === 'auth/credential-already-in-use') {
+        const credential = GithubAuthProvider.credentialFromError(error);
+        if (credential?.accessToken) {
+          localStorage.setItem('github_token', credential.accessToken);
+          setHasGithubToken(true);
+          console.log("Retrieved GitHub token via credentialFromError successfully (account already linked).");
+        } else {
+          alert(`Failed to connect GitHub: ${error.message}`);
+        }
+      } else {
+        alert(`Failed to connect GitHub: ${error.message}`);
+      }
     }
   };
 
@@ -104,9 +130,14 @@ export default function Dashboard() {
       // 1. Call our backend to setup the webhook programmatically FIRST
       const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
       const backendUrl = isLocalhost ? 'http://localhost:3000' : (import.meta.env.VITE_BACKEND_URL || '');
+      const accessToken = localStorage.getItem('access_token');
+      
       const response = await fetch(`${backendUrl}/api/webhooks/setup`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
         body: JSON.stringify({ repoFullName: selectedRepo.full_name, token })
       });
 
@@ -128,13 +159,32 @@ export default function Dashboard() {
   };
 
   const handleLogout = async () => {
+    try {
+      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      const backendUrl = isLocalhost ? 'http://localhost:3000' : (import.meta.env.VITE_BACKEND_URL || '');
+      const refreshToken = localStorage.getItem('refresh_token');
+      
+      if (refreshToken) {
+        await fetch(`${backendUrl}/api/auth/logout`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refreshToken })
+        }).catch(err => console.warn("Failed to call backend logout:", err));
+      }
+    } catch (e) {
+      console.error("Logout API call failed:", e);
+    }
+
     await auth.signOut();
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('refresh_token');
+    localStorage.removeItem('user_profile');
     localStorage.removeItem('github_token');
     setHasGithubToken(false);
     navigate('/');
   };
 
-  if (!user) return <div className="app-container text-gradient" style={{ textAlign: 'center', marginTop: '100px', fontSize: '1.2rem' }}>Welcome to CodeOrbit! Loading dashboard...</div>;
+  if (!user) return <div className="app-container text-gradient dashboard-loading">Welcome to CodeOrbit! Loading dashboard...</div>;
 
   return (
     <div className="app-container animate-fade-in">
@@ -143,7 +193,7 @@ export default function Dashboard() {
           <img src={user.photoURL} alt="Profile" />
           Welcome, {user.displayName || user.email}
         </h2>
-        <button onClick={handleLogout} className="btn-primary" style={{ background: 'transparent', border: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <button onClick={handleLogout} className="btn-primary dashboard-logout-btn">
           <LogOut size={16} /> Sign Out
         </button>
       </header>
@@ -151,7 +201,7 @@ export default function Dashboard() {
       <div className="dashboard-grid">
         {/* Left Column: Repository Selection */}
         <div className="glass-panel dashboard-panel">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px' }}>
+          <div className="dashboard-panel-title">
             <svg 
               width="24" 
               height="24" 
@@ -169,14 +219,13 @@ export default function Dashboard() {
             <h3>Select a Repository</h3>
           </div>
           
-          <div style={{ maxHeight: '400px', overflowY: 'auto', paddingRight: '8px', marginBottom: '24px' }}>
+          <div className="dashboard-repo-list">
             {!hasGithubToken ? (
-              <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-secondary)' }}>
-                <p style={{ marginBottom: '16px' }}>You need to connect your GitHub account to view repositories.</p>
+              <div className="dashboard-empty-state">
+                <p className="dashboard-empty-text">You need to connect your GitHub account to view repositories.</p>
                 <button 
                   onClick={handleConnectGithub} 
-                  className="btn-primary" 
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+                  className="btn-primary dashboard-connect-btn"
                 >
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
                     <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.166 6.839 9.489.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.7-2.782.603-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.462-1.11-1.462-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.646.35-1.086.636-1.336-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.268 2.75 1.022A9.606 9.606 0 0112 6.82c.85.004 1.705.114 2.504.336 1.909-1.29 2.747-1.022 2.747-1.022.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.138 20.161 22 16.416 22 12c0-5.523-4.477-10-10-10z" />
@@ -185,28 +234,20 @@ export default function Dashboard() {
                 </button>
               </div>
             ) : loading ? (
-              <div style={{ textAlign: 'center', padding: '20px', color: 'var(--text-secondary)' }}>
+              <div className="dashboard-loading-repos">
                 <p>Loading your repositories...</p>
               </div>
             ) : repos.length === 0 ? (
-              <p style={{ color: 'var(--text-secondary)' }}>No repositories found.</p>
+              <p className="dashboard-no-repos">No repositories found.</p>
             ) : (
               repos.map(repo => (
                 <div 
                   key={repo.id}
                   onClick={() => setSelectedRepo(repo)}
-                  style={{
-                    padding: '16px',
-                    marginBottom: '12px',
-                    borderRadius: 'var(--radius-md)',
-                    border: selectedRepo?.id === repo.id ? '2px solid var(--accent-primary)' : '1px solid var(--glass-border)',
-                    background: selectedRepo?.id === repo.id ? 'rgba(59, 130, 246, 0.1)' : 'transparent',
-                    cursor: 'pointer',
-                    transition: 'var(--transition-fast)'
-                  }}
+                  className={`dashboard-repo-item ${selectedRepo?.id === repo.id ? 'selected' : ''}`}
                 >
-                  <strong style={{ display: 'block', marginBottom: '4px' }}>{repo.name}</strong>
-                  <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                  <strong className="dashboard-repo-name">{repo.name}</strong>
+                  <span className="dashboard-repo-meta">
                     {repo.private ? '🔒 Private' : '🌍 Public'} • Updated {new Date(repo.updated_at).toLocaleDateString()}
                   </span>
                 </div>
@@ -215,25 +256,25 @@ export default function Dashboard() {
           </div>
 
           {selectedRepo && (
-            <div className="animate-fade-in" style={{ padding: '20px', background: 'var(--glass-bg)', borderRadius: 'var(--radius-md)', border: '1px solid var(--glass-border)' }}>
-              <h4 style={{ marginBottom: '16px' }}>Configure Tracker</h4>
-              <div style={{ marginBottom: '20px' }}>
-                <label style={{ display: 'block', marginBottom: '8px', color: 'var(--text-secondary)' }}>
+            <div className="animate-fade-in dashboard-config-box">
+              <h4 className="dashboard-config-title">Configure Tracker</h4>
+              <div className="dashboard-config-group">
+                <label className="dashboard-config-label">
                   Tracking Duration (Days)
                 </label>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div className="dashboard-duration-container">
                   <input 
                     type="range" 
                     min="1" 
                     max="30" 
                     value={duration} 
                     onChange={(e) => setDuration(e.target.value)}
-                    style={{ flex: 1 }}
+                    className="dashboard-duration-slider"
                   />
-                  <span style={{ fontWeight: 'bold', width: '60px', textAlign: 'right' }}>{duration} days</span>
+                  <span className="dashboard-duration-text">{duration} days</span>
                 </div>
               </div>
-              <button onClick={handleStartTracking} className="btn-primary" style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+              <button onClick={handleStartTracking} className="btn-primary dashboard-start-tracking-btn">
                 <Clock size={18} /> Start Auto-Review
               </button>
             </div>
@@ -242,36 +283,36 @@ export default function Dashboard() {
 
         {/* Right Column: Active Trackers */}
         <div className="glass-panel dashboard-panel">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px' }}>
+          <div className="dashboard-panel-title">
             <Activity size={24} color="var(--success)" />
             <h3>Active Trackers</h3>
           </div>
           
           {activeTrackers.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-secondary)' }}>
-              <CheckCircle size={48} opacity={0.2} style={{ margin: '0 auto 16px' }} />
+            <div className="dashboard-empty-state">
+              <CheckCircle size={48} opacity={0.2} className="dashboard-empty-icon" />
               <p>You don't have any active repository trackers.</p>
-              <p style={{ fontSize: '0.85rem', marginTop: '8px' }}>Select a repository on the left to begin.</p>
+              <p className="dashboard-empty-subtext">Select a repository on the left to begin.</p>
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div className="dashboard-trackers-list">
               {activeTrackers.map(tracker => {
                 const endDate = new Date(tracker.endDate);
                 const isActive = endDate > new Date();
                 
                 return (
-                  <div key={tracker.id} style={{ padding: '16px', background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-md)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
-                      <strong style={{ fontSize: '1.1rem' }}>{tracker.repoFullName}</strong>
+                  <div key={tracker.id} className="dashboard-tracker-card">
+                    <div className="dashboard-tracker-header">
+                      <strong className="dashboard-tracker-name">{tracker.repoFullName}</strong>
                       {isActive ? (
-                        <span style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', color: 'var(--success)', background: 'rgba(16, 185, 129, 0.1)', padding: '4px 10px', borderRadius: '20px' }}>
+                        <span className="status-badge active">
                           <span className="status-indicator"></span> Active
                         </span>
                       ) : (
-                        <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', padding: '4px 10px', borderRadius: '20px' }}>Expired</span>
+                        <span className="status-badge expired">Expired</span>
                       )}
                     </div>
-                    <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', margin: 0 }}>
+                    <p className="dashboard-tracker-meta">
                       Reviewing all PRs until {endDate.toLocaleDateString()}
                     </p>
                   </div>

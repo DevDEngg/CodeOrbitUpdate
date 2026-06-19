@@ -1,12 +1,47 @@
 const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
+const crypto = require('crypto');
+const jwt = require('jsonwebtoken');
 const { admin, db } = require('./firebaseAdmin');
+
+const JWT_SECRET = process.env.JWT_SECRET || 'codeorbit-secret-key-123456';
+const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'codeorbit-refresh-key-123456';
 
 const app = express();
 app.use(cors());
 app.use(morgan('dev'));
 app.use(express.json());
+
+// Password hashing helpers
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+  return { salt, hash };
+}
+
+function verifyPassword(password, salt, hash) {
+  const checkHash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+  return hash === checkHash;
+}
+
+// Authentication Middleware
+const authenticateToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ error: 'Access token required' });
+  }
+
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) {
+      return res.status(403).json({ error: 'Invalid or expired access token' });
+    }
+    req.user = user;
+    next();
+  });
+};
 
 // Health Check Route
 app.get('/api/health', (req, res) => {
@@ -16,6 +51,216 @@ app.get('/api/health', (req, res) => {
 // Direct root /health for uptime monitors (like Render / UptimeRobot)
 app.get('/health', (req, res) => {
   res.status(200).send('OK');
+});
+
+// Authentication Routes
+app.post('/api/auth/signup', async (req, res) => {
+  const { email, password, name } = req.body;
+  if (!email || !password || !name) {
+    return res.status(400).json({ error: 'Missing email, password, or name' });
+  }
+
+  try {
+    const usersRef = db.collection('users');
+    const snapshot = await usersRef.where('email', '==', email.toLowerCase()).limit(1).get();
+    if (!snapshot.empty) {
+      return res.status(400).json({ error: 'Email already registered' });
+    }
+
+    const { salt, hash } = hashPassword(password);
+    const newUserRef = usersRef.doc();
+    const userId = newUserRef.id;
+
+    const userDoc = {
+      userId,
+      email: email.toLowerCase(),
+      name,
+      passwordHash: hash,
+      salt,
+      createdAt: new Date().toISOString()
+    };
+
+    await newUserRef.set(userDoc);
+
+    let firebaseUser = null;
+    try {
+      firebaseUser = await admin.auth().createUser({
+        uid: userId,
+        email: email.toLowerCase(),
+        displayName: name,
+        photoURL: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random`
+      });
+    } catch (fbErr) {
+      console.warn("Could not create Firebase Auth user:", fbErr.message);
+    }
+
+    const accessToken = jwt.sign({ userId, email: email.toLowerCase(), name }, JWT_SECRET, { expiresIn: '1h' });
+    const refreshToken = jwt.sign({ userId, email: email.toLowerCase() }, JWT_REFRESH_SECRET, { expiresIn: '7d' });
+
+    await db.collection('refresh_tokens').doc(userId).set({
+      token: refreshToken,
+      createdAt: new Date().toISOString()
+    });
+
+    let firebaseCustomToken = null;
+    try {
+      firebaseCustomToken = await admin.auth().createCustomToken(userId);
+    } catch (fbTokErr) {
+      console.error("Failed to generate custom token:", fbTokErr);
+    }
+
+    res.status(201).json({
+      accessToken,
+      refreshToken,
+      firebaseCustomToken,
+      user: {
+        uid: userId,
+        email: email.toLowerCase(),
+        displayName: name,
+        photoURL: firebaseUser ? firebaseUser.photoURL : `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random`
+      }
+    });
+
+  } catch (error) {
+    console.error("Signup error:", error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Missing email or password' });
+  }
+
+  try {
+    const usersRef = db.collection('users');
+    const snapshot = await usersRef.where('email', '==', email.toLowerCase()).limit(1).get();
+    if (snapshot.empty) {
+      return res.status(400).json({ error: 'Invalid email or password' });
+    }
+
+    const userDoc = snapshot.docs[0].data();
+    const isPasswordValid = verifyPassword(password, userDoc.salt, userDoc.passwordHash);
+    if (!isPasswordValid) {
+      return res.status(400).json({ error: 'Invalid email or password' });
+    }
+
+    const userId = userDoc.userId;
+    const name = userDoc.name;
+
+    let firebaseUser = null;
+    try {
+      firebaseUser = await admin.auth().getUser(userId);
+    } catch (fbErr) {
+      if (fbErr.code === 'auth/user-not-found') {
+        try {
+          firebaseUser = await admin.auth().createUser({
+            uid: userId,
+            email: email.toLowerCase(),
+            displayName: name,
+            photoURL: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random`
+          });
+        } catch (createErr) {
+          console.warn("Could not sync user in Firebase Auth:", createErr.message);
+        }
+      }
+    }
+
+    const accessToken = jwt.sign({ userId, email: email.toLowerCase(), name }, JWT_SECRET, { expiresIn: '1h' });
+    const refreshToken = jwt.sign({ userId, email: email.toLowerCase() }, JWT_REFRESH_SECRET, { expiresIn: '7d' });
+
+    await db.collection('refresh_tokens').doc(userId).set({
+      token: refreshToken,
+      createdAt: new Date().toISOString()
+    });
+
+    let firebaseCustomToken = null;
+    try {
+      firebaseCustomToken = await admin.auth().createCustomToken(userId);
+    } catch (fbTokErr) {
+      console.error("Failed to generate custom token:", fbTokErr);
+    }
+
+    res.json({
+      accessToken,
+      refreshToken,
+      firebaseCustomToken,
+      user: {
+        uid: userId,
+        email: email.toLowerCase(),
+        displayName: name,
+        photoURL: firebaseUser ? firebaseUser.photoURL : `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random`
+      }
+    });
+
+  } catch (error) {
+    console.error("Login error:", error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+app.post('/api/auth/refresh', async (req, res) => {
+  const { refreshToken } = req.body;
+  if (!refreshToken) {
+    return res.status(400).json({ error: 'Missing refresh token' });
+  }
+
+  try {
+    const decoded = jwt.verify(refreshToken, JWT_REFRESH_SECRET);
+    const userId = decoded.userId;
+
+    const tokenDoc = await db.collection('refresh_tokens').doc(userId).get();
+    if (!tokenDoc.exists || tokenDoc.data().token !== refreshToken) {
+      return res.status(403).json({ error: 'Invalid or expired refresh token' });
+    }
+
+    const userDoc = await db.collection('users').doc(userId).get();
+    if (!userDoc.exists) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const userData = userDoc.data();
+    const accessToken = jwt.sign(
+      { userId, email: userData.email, name: userData.name },
+      JWT_SECRET,
+      { expiresIn: '1h' }
+    );
+
+    let firebaseCustomToken = null;
+    try {
+      firebaseCustomToken = await admin.auth().createCustomToken(userId);
+    } catch (fbTokErr) {
+      console.error("Failed to generate custom token during refresh:", fbTokErr);
+    }
+
+    res.json({
+      accessToken,
+      firebaseCustomToken
+    });
+
+  } catch (error) {
+    console.error("Refresh token error:", error);
+    res.status(403).json({ error: 'Invalid or expired refresh token' });
+  }
+});
+
+app.post('/api/auth/logout', async (req, res) => {
+  const { refreshToken } = req.body;
+  if (!refreshToken) {
+    return res.status(400).json({ error: 'Missing refresh token' });
+  }
+
+  try {
+    const decoded = jwt.verify(refreshToken, JWT_REFRESH_SECRET);
+    const userId = decoded.userId;
+
+    await db.collection('refresh_tokens').doc(userId).delete();
+    res.json({ message: 'Logged out successfully' });
+  } catch (error) {
+    console.error("Logout error:", error);
+    res.status(200).json({ message: 'Logged out (token already invalid)' });
+  }
 });
 
 const { getPRDiffs, postPRComment } = require('./githubService');
@@ -121,7 +366,7 @@ app.post('/api/webhooks/github', async (req, res) => {
 });
 
 // Setup Webhook Programmatically on GitHub
-app.post('/api/webhooks/setup', async (req, res) => {
+app.post('/api/webhooks/setup', authenticateToken, async (req, res) => {
   const { repoFullName, token } = req.body;
 
   if (!repoFullName || !token) {

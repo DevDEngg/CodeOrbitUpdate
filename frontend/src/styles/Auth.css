@@ -212,7 +212,13 @@
 
 .auth-footer {
   text-align: center;
-  margin-top: 32px;
+  margin-top: 24px;
   font-size: 0.95rem;
   color: var(--text-secondary);
+}
+
+.auth-error {
+  color: var(--error);
+  margin-bottom: 16px;
+  font-size: 0.9rem;
 }

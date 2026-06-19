@@ -1,11 +1,11 @@
 import React from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
-import Login from './Login'
-import SignUp from './SignUp'
-import Dashboard from './Dashboard'
-import { ThemeProvider } from './ThemeContext'
-import ThemeToggle from './ThemeToggle'
-import './index.css'
+import Login from './pages/Login'
+import SignUp from './pages/SignUp'
+import Dashboard from './pages/Dashboard'
+import { ThemeProvider } from './context/ThemeContext'
+import ThemeToggle from './components/ThemeToggle'
+import './styles/index.css'
 
 function App() {
   return (

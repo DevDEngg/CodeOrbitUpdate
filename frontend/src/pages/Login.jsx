@@ -1,16 +1,13 @@
 import React, { useState } from 'react';
-import { signInWithEmailAndPassword, signInWithPopup } from 'firebase/auth';
-import { auth, googleProvider } from './firebase';
+import { signInWithCustomToken } from 'firebase/auth';
+import { auth } from '../config/firebase';
 import { useNavigate, Link } from 'react-router-dom';
-import robotImg from './assets/robot.png';
-import robotLightImg from './assets/robot_light.png';
-import logoImg from './assets/logo.png';
-import { useTheme } from './ThemeContext';
-import './Auth.css';
+import roboMainImg from '../assets/RoboMain.png';
+import logoImg from '../assets/logo.png';
+import '../styles/Auth.css';
 
 export default function Login() {
   const navigate = useNavigate();
-  const { theme } = useTheme();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -21,36 +18,45 @@ export default function Login() {
     setError('');
     setLoading(true);
     try {
-      await signInWithEmailAndPassword(auth, email, password);
-      // Firebase automatically handles persistence
+      const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+      const backendUrl = isLocalhost ? 'http://localhost:3000' : (import.meta.env.VITE_BACKEND_URL || '');
+
+      const response = await fetch(`${backendUrl}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Login failed with status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      // Store custom JWT access and refresh tokens
+      localStorage.setItem('access_token', data.accessToken);
+      localStorage.setItem('refresh_token', data.refreshToken);
+      localStorage.setItem('user_profile', JSON.stringify(data.user));
+
+      // Sign into Firebase Auth using the custom token to preserve client-side Firestore access
+      if (data.firebaseCustomToken) {
+        await signInWithCustomToken(auth, data.firebaseCustomToken);
+      }
+
       navigate('/dashboard');
-    } catch (error) {
-      console.error("Error during login:", error.message);
-      setError(`Login failed: ${error.message}`);
+    } catch (err) {
+      console.error("Error during login:", err.message);
+      setError(`Login failed: ${err.message}`);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleProviderLogin = async (provider, providerName) => {
-    setError('');
-    try {
-      await signInWithPopup(auth, provider);
-      navigate('/dashboard');
-    } catch (error) {
-      console.error(`Error during ${providerName} login:`, error.message);
-      if (error.code === 'auth/account-exists-with-different-credential') {
-        setError(`An account already exists with the same email. Please sign in with your other provider first, then connect ${providerName} from the dashboard.`);
-      } else {
-        setError(`${providerName} login failed: ${error.message}`);
-      }
     }
   };
 
   return (
     <div className="auth-container animate-fade-in">
       <div className="auth-hero">
-        <img src={theme === 'light' ? robotLightImg : robotImg} alt="AI Robot" className="auth-hero-image" />
+        <img src={roboMainImg} alt="AI Robot" className="auth-hero-image" />
       </div>
       
       <div className="auth-form-container">
@@ -61,7 +67,7 @@ export default function Login() {
           </div>
           <p className="auth-subtitle">Everything around your code ecosystem</p>
 
-          {error && <div style={{ color: 'var(--error)', marginBottom: '16px', fontSize: '0.9rem' }}>{error}</div>}
+          {error && <div className="auth-error">{error}</div>}
 
           <form className="auth-form" onSubmit={handleEmailLogin}>
             <div className="auth-input-group">
@@ -101,13 +107,13 @@ export default function Login() {
             </button>
           </form>
 
+          {/* Social login temporarily disabled
           <div className="auth-divider">Or continue with</div>
-
           <div className="auth-social-buttons">
             <button 
               type="button" 
               className="auth-social-btn" 
-              onClick={() => handleProviderLogin(googleProvider, 'Google')}
+              onClick={() => {}}
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
@@ -118,6 +124,7 @@ export default function Login() {
               Google
             </button>
           </div>
+          */}
 
           <div className="auth-footer">
             Don't have an account? <Link to="/signup" className="auth-link">Sign Up</Link>
