@@ -2,12 +2,15 @@ import React, { useState } from 'react';
 import { signInWithCustomToken } from 'firebase/auth';
 import { auth } from '../config/firebase';
 import { useNavigate, Link } from 'react-router-dom';
-import roboMainImg from '../assets/RoboMain.png';
+import robotImg from '../assets/robot.png';
+import robotLightImg from '../assets/robot_light.png';
 import logoImg from '../assets/logo.png';
+import { useTheme } from '../context/ThemeContext';
 import '../styles/Auth.css';
 
 export default function Login() {
   const navigate = useNavigate();
+  const { theme } = useTheme();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -56,7 +59,11 @@ export default function Login() {
   return (
     <div className="auth-container animate-fade-in">
       <div className="auth-hero">
-        <img src={roboMainImg} alt="AI Robot" className="auth-hero-image" />
+        <img
+          src={theme === 'light' ? robotLightImg : robotImg}
+          alt="AI Robot"
+          className="auth-hero-image"
+        />
       </div>
       
       <div className="auth-form-container">
