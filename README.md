@@ -33,6 +33,13 @@ With CodeOrbit, developers can authenticate, link their GitHub accounts, choose 
 *   ⚡ **Automated Webhook Management**: Programmatically configures webhook subscriptions (`pull_request` events) for GitHub repositories using personal OAuth/Access tokens.
 *   🕒 **On-Demand Tracking Duration**: Choose how long to track a repository (from 1 to 30 days). Expired sessions automatically stop webhook actions.
 *   🛡️ **Secure Session Storage**: Uses Firebase Firestore via the backend Firebase Admin SDK to keep track of active sessions and securely store tokens.
+*   🔒 **Server-Side Token Storage & Encryption**: GitHub Access Tokens are never stored on the client side (e.g., `localStorage`). They are linked via a secure backend endpoint and stored encrypted at rest in Firestore using **AES-256-GCM** encryption. All GitHub API requests are proxied securely through the backend.
+*   🔍 **Client-Side Repo Search & Filter**: Instantly search and filter through fetched repositories client-side before starting a tracker.
+*   🗂️ **Accordion Configuration**: The Configure Tracker panel expands directly inline under the selected repository card (accordion-style), complete with an explicit Cancel action.
+*   📊 **Dynamic Sidebar Statistics**: Features a dynamic statistics block in the sidebar showing the number of Repos Tracked and live PR Reviews Posted (summed from active sessions).
+*   📈 **Active Tracking Progress Bar**: Displays a live percentage completed progress bar along with a counter of processed PR reviews per tracker.
+*   📅 **Localized Date Formatting**: Displays all metadata and tracker expiration dates formatted clearly as `DD/MM/YYYY`.
+*   👤 **Avatar Initials Fallback**: Automatically displays a custom styled circular initials fallback badge if the user's GitHub profile photo fails to load.
 *   🔐 **Secure Authentication**: Backend-mediated Email/Password authentication with custom JWT token storage and optional Firebase client state synchronization.
 *   🎨 **Clean & Responsive UI**: Built with a clean, high-utility UI optimized for both desktop and mobile viewports, featuring dark/light mode toggle support.
 
@@ -50,8 +57,9 @@ sequenceDiagram
     participant GitHub as GitHub API
 
     User->>Frontend: Select Repo & Click "Start Tracking"
-    Frontend->>Backend: POST /api/webhooks/setup (JWT Token, GitHub Token, Repo Info)
+    Frontend->>Backend: POST /api/webhooks/setup (JWT Token, Repo Info)
     Note over Backend: Verify JWT & Validate Request
+    Note over Backend: Retrieve & Decrypt User GitHub Token
     Backend->>GitHub: POST /repos/{owner}/{repo}/hooks (Register Webhook URL)
     GitHub-->>Backend: Webhook Created (or already exists)
     Backend->>DB: Add Active Session to tracking_sessions collection
@@ -152,14 +160,17 @@ cd CodeOrbit
 ```
 
 #### 2. Backend Configuration
-Create a `.env` file in the `/backend` directory:
-```env
-PORT=3000
-FIREBASE_PROJECT_ID=your-firebase-project-id
-FIREBASE_CLIENT_EMAIL=your-firebase-admin-sdk-email
-FIREBASE_PRIVATE_KEY="your-firebase-private-key"
-GEMINI_API_KEY=your-gemini-api-key
-```
+   Create a `.env` file in the `/backend` directory:
+   ```env
+   PORT=3000
+   FIREBASE_PROJECT_ID=your-firebase-project-id
+   FIREBASE_CLIENT_EMAIL=your-firebase-admin-sdk-email
+   FIREBASE_PRIVATE_KEY="your-firebase-private-key"
+   GEMINI_API_KEY=your-gemini-api-key
+   JWT_SECRET=your-jwt-auth-secret
+   TOKEN_ENCRYPTION_KEY=your-64-character-hex-encryption-key
+   WEBHOOK_BASE_URL=https://your-public-url-or-ngrok.dev
+   ```
 
 *Install backend dependencies:*
 ```bash
@@ -187,6 +198,18 @@ npm install
 
 ---
 
+### 🔧 Database Cleanup Utility Script
+
+If you want to clear your development database to test the workflow from a clean state, you can run the following script from the root workspace directory:
+
+```bash
+node backend/clean_db.js
+```
+
+This script connects to Firestore using your backend env credentials and safely deletes all documents in the `users`, `user_github_tokens`, and `tracking_sessions` collections.
+
+---
+
 ### 🏃 Running Locally
 
 To run CodeOrbit, you'll need to spin up both the backend server and the frontend client.
@@ -210,10 +233,10 @@ npm run dev
 ## 💡 How it Works Under the Hood
 
 1.  **Authorization**: Users register and log in via email and password. The request hits the Express backend, which hashes/validates the credentials using Firebase Firestore, returns a secure JWT access token to the client, and signs in client-side Firebase Auth using a custom token to keep SDK states synchronized.
-2.  **GitHub Connection**: In the dashboard, the user authorizes CodeOrbit via a Firebase OAuth GitHub popup. The resulting Access Token is saved in the client's local storage to dynamically pull repository listings.
+2.  **GitHub Connection**: In the dashboard, the user authorizes CodeOrbit via a Firebase OAuth GitHub popup. The resulting Access Token is sent directly to the backend `POST /api/github/link` where it is encrypted using **AES-256-GCM** and stored at rest in Firestore. The token is never exposed to browser storage. Repository fetching is proxied through the backend `GET /api/github/repos`.
 3.  **Tracking Setup**: The user selects a repository from their GitHub repo grid, configures tracking duration (e.g. 7 days), and starts tracking.
-4.  **Webhook Registration**: The frontend initiates a JWT-authorized POST request to the backend `/api/webhooks/setup`. The backend calls the GitHub API to register a webhook listener pointing to the backend's payload URL and creates an active session entry in the `tracking_sessions` Firestore collection.
-5.  **Review Processing**: When a PR is opened, updated, or reopened, GitHub transmits a payload to `/api/webhooks/github`. The backend validates the active tracking record in Firestore, pulls PR patch diffs, queries Google Gemini 2.5 Flash for review suggestions, and posts the resulting code critique directly onto the PR.
+4.  **Webhook Registration**: The frontend initiates a JWT-authorized POST request to the backend `/api/webhooks/setup`. The backend retrieves the user's encrypted token, decrypts it, calls the GitHub API to register a webhook listener pointing to the backend's payload URL, and creates an active session entry in the `tracking_sessions` Firestore collection with `prsReviewed: 0`.
+5.  **Review Processing**: When a PR is opened, updated, or reopened, GitHub transmits a payload to `/api/webhooks/github`. The backend validates the active tracking record in Firestore, decrypts the session's GitHub token, pulls PR patch diffs, queries Google Gemini 2.5 Flash for review suggestions, posts the review directly onto the PR, and increments the `prsReviewed` count in Firestore.
 
 ---
 
